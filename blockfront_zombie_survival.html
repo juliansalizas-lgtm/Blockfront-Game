@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Blockfront: Zombie Survival</title>
+<style>
+:root{--bg:#101820;--panel:#1b2833;--line:#425563;--text:#eef6fb;--gold:#ffd166;--green:#71d88a;--red:#ff5d68}
+*{box-sizing:border-box} html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,sans-serif;touch-action:none}
+#game{display:block;width:100vw;height:100vh;image-rendering:pixelated;cursor:crosshair}
+.hud{position:fixed;z-index:3;top:10px;left:10px;right:10px;display:flex;gap:8px;align-items:flex-start;pointer-events:none;flex-wrap:wrap}
+.panel{background:#101820df;border:1px solid #516573;border-radius:12px;padding:8px 11px;box-shadow:0 4px 18px #0005;backdrop-filter:blur(4px)}
+#health{font-size:20px;letter-spacing:2px;white-space:nowrap} #stats{font-weight:700;font-size:14px}
+#hint{margin-left:auto;max-width:340px;font-size:12px;line-height:1.45}
+#message{position:fixed;z-index:4;top:90px;left:50%;transform:translateX(-50%);background:#101820e8;border:1px solid #607785;padding:9px 15px;border-radius:10px;text-align:center;font-weight:700;pointer-events:none;max-width:90vw}
+.overlay{position:fixed;inset:0;z-index:8;display:none;align-items:center;justify-content:center;background:#071018b8;padding:16px}
+.card{width:min(560px,96vw);max-height:90vh;overflow:auto;background:#17242e;border:2px solid #506674;border-radius:18px;padding:18px;box-shadow:0 15px 60px #0009}
+h1,h2{margin:0 0 8px} p{color:#d2e0e8;margin:8px 0 14px}.shopgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+button{font:inherit;color:var(--text);background:#2a3c49;border:1px solid #627987;border-radius:10px;padding:10px 12px;cursor:pointer;font-weight:700}
+button:active{transform:translateY(1px)}button:disabled{opacity:.42;cursor:not-allowed}.buy{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;min-height:77px}.price{color:var(--gold);font-size:13px}.sub{font-size:12px;color:#c0d0da;font-weight:500}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px}.close{float:right}
+#touchControls{display:none;position:fixed;inset:auto 0 12px 0;z-index:5;pointer-events:none;justify-content:space-between;padding:0 14px}
+.pad{pointer-events:auto;width:124px;height:124px;border-radius:50%;background:#10182099;border:2px solid #8ca2b2aa;position:relative;touch-action:none}
+#stick{position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:#d9e8f2bb;border:2px solid #fff}
+.actions{display:grid;grid-template-columns:repeat(2,58px);gap:8px;pointer-events:auto;align-content:end}
+.actions button{width:58px;height:58px;padding:3px;border-radius:50%;background:#182b38dd;border:2px solid #9db2c0;font-size:11px}
+@media (pointer:coarse){#touchControls{display:flex}#hint{display:none}}
+@media(max-width:480px){.shopgrid{grid-template-columns:1fr 1fr}.panel{padding:6px 8px}#health{font-size:17px}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hud">
+  <div class="panel"><div style="font-size:10px;color:#b9cbd6">LEBEN</div><div id="health">❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️</div></div>
+  <div class="panel" id="stats">🪙 0 &nbsp; 🔫 Faust &nbsp; 🛡️ 0</div>
+  <div class="panel" id="hint">WASD / Pfeile: laufen · Maus: zielen & schießen · Leertaste: Nahkampf · E: Shop in der Save Zone</div>
+</div>
+<div id="message">Finde die grüne Save Zone!</div>
+<div id="shop" class="overlay">
+ <div class="card">
+  <button class="close" onclick="closeShop()">✕ Schließen</button>
+  <h2>🟩 Safe Zone – Händler</h2>
+  <p>Hier erscheinen keine Zombies. Kaufe Ausrüstung und Essen. Essen heilt dich sofort.</p>
+  <div class="row"><b>Dein Geld: <span id="shopMoney">0</span> 🪙</b><span id="armorInfo">Rüstung: 0</span></div>
+  <div class="shopgrid" id="shopItems" style="margin-top:12px"></div>
+  <p class="sub">Tipp: Gehe aus der Safe Zone, um Zombies zu finden. Deine gekauften Waffen bleiben ausgerüstet.</p>
+ </div>
+</div>
+<div id="gameover" class="overlay">
+ <div class="card" style="text-align:center">
+  <h1>💀 Du wurdest besiegt!</h1><p>Die Welt ist noch da. Versuche es erneut und rüste dich in der Safe Zone aus.</p>
+  <button onclick="restart()">Nochmal spielen</button>
+ </div>
+</div>
+<div id="touchControls">
+ <div class="pad" id="pad"><div id="stick"></div></div>
+ <div class="actions"><button id="fireBtn">🔫<br>FEUER</button><button id="meleeBtn">⚔️<br>HIT</button><button id="shopBtn">🛒<br>SHOP</button><button id="foodBtn">🍞<br>ESSEN</button></div>
+</div>
+<script>
+(() => {
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+let W=0,H=0,dpr=1;
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+'px';canvas.style.height=H+'px';ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener('resize',resize);resize();
+const TILE=40, MAPW=60, MAPH=60;
+const map=[];
+for(let y=0;y<MAPH;y++){map[y]=[];for(let x=0;x<MAPW;x++){
+ let r=Math.random();map[y][x]=r<.10?'water':r<.24?'path':r<.32?'stone':'grass';
+}}
+function pathLine(x1,y1,x2,y2){let x=x1,y=y1;while(x!==x2){map[y][x]='path';x+=Math.sign(x2-x)}while(y!==y2){map[y][x]='path';y+=Math.sign(y2-y)}}
+pathLine(30,30,30,10);pathLine(30,30,49,30);pathLine(30,30,12,30);pathLine(30,30,30,49);
+for(let i=0;i<8;i++){let x=5+Math.random()*50|0,y=5+Math.random()*50|0;for(let yy=y;yy<y+2;yy++)for(let xx=x;xx<x+2;xx++)if(map[yy]?.[xx])map[yy][xx]='wall'}
+const safe={x:30*TILE+TILE/2,y:30*TILE+TILE/2,r:105};
+let player, zombies=[], bullets=[], drops=[], particles=[], money, weapon, armor, food, kills, time, shopOpen=false, dead=false, fireHeld=false, move={x:0,y:0}, mouse={x:innerWidth/2,y:innerHeight/2,down:false}, lastShot=0, lastMelee=0, spawnClock=0, messageUntil=0;
+const keys={};
+const weapons=[
+ {id:'pistol',name:'Pistole',price:60,damage:1,rate:350,range:430,ammo:'∞',desc:'Solide Starter-Waffe'},
+ {id:'smg',name:'Maschinenpistole',price:150,damage:1,rate:115,range:390,desc:'Schnell, wenig Schaden'},
+ {id:'rifle',name:'Sturmgewehr',price:260,damage:2,rate:230,range:560,desc:'Stark und präzise'},
+ {id:'shotgun',name:'Schrotflinte',price:220,damage:3,rate:650,range:250,desc:'Hoher Schaden auf kurze Distanz'}
+];
+function reset(){player={x:safe.x,y:safe.y+155,r:13,hp:10,maxHp:10,speed:190,face:0};zombies=[];bullets=[];drops=[];particles=[];money=35;weapon=null;armor=0;food=0;kills=0;time=0;shopOpen=false;dead=false;spawnClock=1;document.getElementById('shop').style.display='none';document.getElementById('gameover').style.display='none';say('Willkommen! Der Händler ist in der grünen Save Zone.');}
+reset();
+function say(s){const el=document.getElementById('message');el.textContent=s;el.style.display='block';messageUntil=performance.now()+2600}
+function closeShop(){shopOpen=false;document.getElementById('shop').style.display='none'}
+function inSafe(p=player){return Math.hypot(p.x-safe.x,p.y-safe.y)<safe.r}
+function openShop(){if(inSafe()){shopOpen=true;renderShop();document.getElementById('shop').style.display='flex'}else say('Der Shop ist nur in der grünen Save Zone!')}
+window.closeShop=closeShop;
+function renderShop(){
+ document.getElementById('shopMoney').textContent=money;
+ document.getElementById('armorInfo').textContent='Rüstung: '+armor;
+ const list=document.getElementById('shopItems');list.innerHTML='';
+ const items=[
+  ...weapons.map(w=>({name:'🔫 '+w.name,price:w.price,desc:w.desc,action:()=>{weapon=w; say(w.name+' ausgerüstet!');renderShop()}})),
+  {name:'🛡️ Lederrüstung',price:90,desc:'Verringert eingehenden Schaden um 1 Herz (mindestens 1).',action:()=>{armor=Math.min(3,armor+1);renderShop()}},
+  {name:'🥪 Sandwich',price:25,desc:'Heilt 3 Herzen sofort.',action:()=>{if(player.hp>=10){say('Du hast bereits volle Leben!');return}player.hp=Math.min(10,player.hp+3);renderShop()}},
+  {name:'🍎 Apfel',price:12,desc:'Heilt 1 Herz sofort.',action:()=>{if(player.hp>=10){say('Du hast bereits volle Leben!');return}player.hp=Math.min(10,player.hp+1);renderShop()}},
+  {name:'🧪 Medkit',price:55,desc:'Heilt 6 Herzen.',action:()=>{if(player.hp>=10){say('Du hast bereits volle Leben!');return}player.hp=Math.min(10,player.hp+6);renderShop()}}
+ ];
+ for(const it of items){const b=document.createElement('button');b.className='buy';b.innerHTML=`<span>${it.name}</span><span class="price">${it.price} 🪙</span><span class="sub">${it.desc}</span>`;b.onclick=()=>{if(money<it.price){say('Nicht genug Geld!');return}if(it.name.includes('Rüstung')&&armor>=3){say('Rüstung bereits auf Maximum!');return}if((it.name.includes('Sandwich')||it.name.includes('Apfel')||it.name.includes('Medkit'))&&player.hp>=10){say('Du hast bereits volle Leben!');return}money-=it.price;it.action();document.getElementById('shopMoney').textContent=money;updateHud()};list.appendChild(b)}
+}
+function updateHud(){const full=Math.floor(player.hp),half=player.hp-full;let hearts='';for(let i=0;i<10;i++){if(i<full)hearts+='❤️';else if(i===full&&half>0)hearts+='💔';else hearts+='🖤'}document.getElementById('health').textContent=hearts;document.getElementById('stats').textContent=`🪙 ${money}  ·  ${weapon?'🔫 '+weapon.name:'👊 Faust'}  ·  🛡️ ${armor}  ·  ☠️ ${kills}`}
+function rand(a,b){return a+Math.random()*(b-a)}
+function spawnZombie(){
+ let x,y,tries=0;do{const a=Math.random()*Math.PI*2,d=rand(330,650);x=player.x+Math.cos(a)*d;y=player.y+Math.sin(a)*d;tries++}while((Math.hypot(x-safe.x,y-safe.y)<safe.r+30||x<40||y<40||x>MAPW*TILE-40||y>MAPH*TILE-40)&&tries<20);
+ const type=Math.random()<.23?'brute':Math.random()<.18?'runner':'normal';
+ zombies.push({x,y,r:type==='brute'?17:12,hp:type==='brute'?7:type==='runner'?2:3,maxHp:type==='brute'?7:type==='runner'?2:3,type,speed:type==='brute'?42:type==='runner'?86:57,damage:type==='brute'?3:1,attack:0,flash:0});
+}
+function dropLoot(z){const amount=z.type==='brute'?(12+Math.random()*16|0):(3+Math.random()*9|0);drops.push({x:z.x,y:z.y,r:8,type:'coin',amount,life:22});if(Math.random()<.28)drops.push({x:z.x+rand(-15,15),y:z.y+rand(-15,15),r:7,type:Math.random()<.55?'food':'med',life:22});}
+function hitPlayer(dmg){if(inSafe())return;let actual=Math.max(1,dmg-Math.floor(armor*.5));player.hp=Math.max(0,player.hp-actual);for(let i=0;i<7;i++)particles.push({x:player.x,y:player.y,vx:rand(-70,70),vy:rand(-70,70),life:.3,color:'#ff6670'});if(player.hp<=0){dead=true;document.getElementById('gameover').style.display='flex';}updateHud()}
+function shoot(){if(!weapon||dead||shopOpen)return;let now=performance.now();if(now-lastShot<weapon.rate)return;lastShot=now;const cam=camera();const wx=mouse.x+cam.x,wy=mouse.y+cam.y;let dx=wx-player.x,dy=wy-player.y,len=Math.hypot(dx,dy)||1;player.face=Math.atan2(dy,dx);const spread=weapon.id==='shotgun'?.22:weapon.id==='smg'?.06:.025;for(let i=0;i<(weapon.id==='shotgun'?5:1);i++){let a=player.face+rand(-spread,spread);bullets.push({x:player.x+Math.cos(a)*16,y:player.y+Math.sin(a)*16,vx:Math.cos(a)*620,vy:Math.sin(a)*620,life:weapon.range/620,damage:weapon.damage,from:'player'})}say('');document.getElementById('message').style.display='none'}
+function melee(){if(dead||shopOpen||performance.now()-lastMelee<500)return;lastMelee=performance.now();let hit=false;for(const z of zombies){if(Math.hypot(z.x-player.x,z.y-player.y)<45){z.hp-=1;z.flash=.12;hit=true;if(z.hp<=0){kills++;dropLoot(z);z.dead=true}}}if(hit)say('Treffer!');}
+function camera(){return{x:Math.max(0,Math.min(MAPW*TILE-W,player.x-W/2)),y:Math.max(0,Math.min(MAPH*TILE-H,player.y-H/2))}}
+function blocked(x,y,r){if(x<r||y<r||x>MAPW*TILE-r||y>MAPH*TILE-r)return true;let tx=Math.floor(x/TILE),ty=Math.floor(y/TILE);return map[ty]?.[tx]==='water'||map[ty]?.[tx]==='wall'}
+function movePlayer(dx,dy,dt){const l=Math.hypot(dx,dy);if(!l)return;dx/=l;dy/=l;let nx=player.x+dx*player.speed*dt,ny=player.y+dy*player.speed*dt;if(!blocked(nx,player.y,player.r))player.x=nx;if(!blocked(player.x,ny,player.r))player.y=ny;if(dx||dy)player.face=Math.atan2(dy,dx)}
+function update(dt){
+ if(dead||shopOpen)return;time+=dt;
+ let dx=(keys.KeyD||keys.ArrowRight?1:0)-(keys.KeyA||keys.ArrowLeft?1:0)+move.x;
+ let dy=(keys.KeyS||keys.ArrowDown?1:0)-(keys.KeyW||keys.ArrowUp?1:0)+move.y;
+ movePlayer(dx,dy,dt);
+ spawnClock-=dt;if(spawnClock<=0&&zombies.length<20){if(Math.hypot(player.x-safe.x,player.y-safe.y)>safe.r+35)spawnZombie();spawnClock=rand(1.8,3.4)}
+ for(const z of zombies){if(z.dead)continue;z.flash=Math.max(0,z.flash-dt);let dist=Math.hypot(player.x-z.x,player.y-z.y);if(dist>1&&dist<700&&dist>z.r+player.r+3){let speed=z.speed*(inSafe()?0:1);let nx=z.x+(player.x-z.x)/dist*speed*dt,ny=z.y+(player.y-z.y)/dist*speed*dt;if(!blocked(nx,z.y,z.r))z.x=nx;if(!blocked(z.x,ny,z.r))z.y=ny;}if(dist<z.r+player.r+5){z.attack-=dt;if(z.attack<=0){hitPlayer(z.damage);z.attack=z.type==='brute'?1.5:1.15}}}
+ zombies=zombies.filter(z=>!z.dead);
+ for(const b of bullets){b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;if(blocked(b.x,b.y,2))b.life=0;for(const z of zombies){if(z.dead)continue;if(Math.hypot(z.x-b.x,z.y-b.y)<z.r+4){z.hp-=b.damage;z.flash=.12;b.life=0;if(z.hp<=0){z.dead=true;kills++;dropLoot(z)}break}}}
+ bullets=bullets.filter(b=>b.life>0);zombies=zombies.filter(z=>!z.dead);
+ for(const d of drops){d.life-=dt;if(Math.hypot(player.x-d.x,player.y-d.y)<25){if(d.type==='coin'){money+=d.amount;say('+'+d.amount+' Münzen!')}else if(d.type==='food'){drops.push({x:d.x,y:d.y,r:0,type:'',life:0});food++;say('🍎 Essen eingesammelt! Drücke F zum Essen.')}else{player.hp=Math.min(10,player.hp+2);say('🩹 +2 Herzen!')}d.life=0;updateHud()}}
+ drops=drops.filter(d=>d.life>0);
+ for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt}particles=particles.filter(p=>p.life>0);
+ updateHud();if(inSafe()&&!shopOpen&&time<1.5)say('🟩 Save Zone: Shop mit E öffnen. Hier gibt es keine Zombies.');
+}
+function drawTile(x,y,type){const px=x*TILE,py=y*TILE;ctx.fillStyle=type==='grass'?'#426d43':type==='path'?'#887653':type==='stone'?'#68767b':type==='water'?'#286b8b':'#31443b';ctx.fillRect(px,py,TILE,TILE);ctx.fillStyle=type==='grass'?'#54854f':type==='path'?'#9b8962':type==='stone'?'#7e8d91':type==='water'?'#3586a5':'#3e5944';ctx.fillRect(px+2,py+2,TILE-4,TILE-4);if(type==='grass'){ctx.fillStyle='#8cb56a';ctx.fillRect(px+8,py+11,3,3);ctx.fillRect(px+27,py+28,3,3)}if(type==='water'){ctx.fillStyle='#78c9db';ctx.fillRect(px+7,py+11,13,2);ctx.fillRect(px+23,py+28,10,2)}}
+function draw(){
+ ctx.clearRect(0,0,W,H);const cam=camera();ctx.save();ctx.translate(-cam.x,-cam.y);
+ const x0=Math.max(0,Math.floor(cam.x/TILE)-1),y0=Math.max(0,Math.floor(cam.y/TILE)-1),x1=Math.min(MAPW,Math.ceil((cam.x+W)/TILE)+1),y1=Math.min(MAPH,Math.ceil((cam.y+H)/TILE)+1);
+ for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++)drawTile(x,y,map[y][x]);
+ // small blocky houses
+ for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++)if(map[y][x]==='wall'){ctx.fillStyle='#594b40';ctx.fillRect(x*TILE+2,y*TILE+2,TILE-4,TILE-4);ctx.fillStyle='#8b6a4d';ctx.fillRect(x*TILE+5,y*TILE+5,TILE-10,12);ctx.fillStyle='#2a2524';ctx.fillRect(x*TILE+14,y*TILE+22,12,16)}
+ // safe zone
+ ctx.beginPath();ctx.arc(safe.x,safe.y,safe.r,0,Math.PI*2);ctx.fillStyle='#42db7a24';ctx.fill();ctx.strokeStyle='#65f39a';ctx.lineWidth=3;ctx.stroke();
+ ctx.fillStyle='#2c6a43';ctx.fillRect(safe.x-43,safe.y-31,86,62);ctx.fillStyle='#4b9561';ctx.fillRect(safe.x-37,safe.y-25,74,50);ctx.fillStyle='#c9f5d4';ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.fillText('SAFE ZONE',safe.x,safe.y-42);ctx.fillStyle='#173a2b';ctx.fillRect(safe.x-9,safe.y+3,18,22);ctx.fillStyle='#b5f4c5';ctx.fillText('SHOP',safe.x,safe.y-4);
+ // drops
+ for(const d of drops){if(d.type==='coin'){ctx.fillStyle='#e8b934';ctx.fillRect(d.x-6,d.y-6,12,12);ctx.fillStyle='#fff0a0';ctx.fillRect(d.x-3,d.y-3,4,4)}else if(d.type==='food'){ctx.fillStyle='#e66a4a';ctx.fillRect(d.x-6,d.y-6,12,12);ctx.fillStyle='#70c86a';ctx.fillRect(d.x+1,d.y-8,4,4)}else{ctx.fillStyle='#eaf7ff';ctx.fillRect(d.x-6,d.y-6,12,12);ctx.fillStyle='#e45b6c';ctx.fillRect(d.x-2,d.y-5,4,10);ctx.fillRect(d.x-5,d.y-2,10,4)}}
+ // bullets
+ ctx.fillStyle='#ffe59b';for(const b of bullets)ctx.fillRect(b.x-3,b.y-3,6,6);
+ // zombies
+ for(const z of zombies){ctx.fillStyle='#0005';ctx.fillRect(z.x-z.r,z.y+z.r,z.r*2,5);ctx.fillStyle=z.flash?'#fff':z.type==='brute'?'#5b4638':z.type==='runner'?'#a4bd48':'#5ea65d';ctx.fillRect(z.x-z.r,z.y-z.r,z.r*2,z.r*2);ctx.fillStyle='#2b5636';ctx.fillRect(z.x-z.r+3,z.y-z.r+z.r, z.r*2-6,z.r-1);ctx.fillStyle='#f7e7cf';ctx.fillRect(z.x-6,z.y-4,4,4);ctx.fillRect(z.x+2,z.y-4,4,4);ctx.fillStyle='#151c1e';ctx.fillRect(z.x-5,z.y-3,2,2);ctx.fillRect(z.x+3,z.y-3,2,2);ctx.fillStyle='#1119';ctx.fillRect(z.x-z.r,z.y-z.r-8,z.r*2,4);ctx.fillStyle=z.type==='brute'?'#d95656':'#8af08b';ctx.fillRect(z.x-z.r,z.y-z.r-8,z.r*2*Math.max(0,z.hp/z.maxHp),4);if(z.type==='brute'){ctx.fillStyle='#ffe4a0';ctx.font='10px system-ui';ctx.textAlign='center';ctx.fillText('BRUTE',z.x,z.y-z.r-12)}}
+ // player shadow and block avatar
+ ctx.fillStyle='#0005';ctx.fillRect(player.x-12,player.y+12,24,5);
+ ctx.fillStyle='#2e75bf';ctx.fillRect(player.x-11,player.y-1,22,17);ctx.fillStyle='#e2b78d';ctx.fillRect(player.x-9,player.y-14,18,14);ctx.fillStyle='#382d27';ctx.fillRect(player.x-10,player.y-16,20,6);ctx.fillStyle='#20262a';ctx.fillRect(player.x-6,player.y-8,3,3);ctx.fillRect(player.x+3,player.y-8,3,3);
+ ctx.save();ctx.translate(player.x,player.y+1);ctx.rotate(player.face);ctx.fillStyle=weapon?'#aeb9c3':'#8c6749';ctx.fillRect(7,-3,weapon?18:10,6);if(weapon){ctx.fillStyle='#242c34';ctx.fillRect(18,-2,8,4)}ctx.restore();
+ for(const p of particles){ctx.globalAlpha=Math.max(0,p.life/.3);ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,4,4);ctx.globalAlpha=1}
+ ctx.restore();
+ // minimap
+ const mw=94,mh=94,mx=W-mw-12,my=H-mh-12;ctx.fillStyle='#0c151dcc';ctx.fillRect(mx,my,mw,mh);ctx.strokeStyle='#a9bac5';ctx.strokeRect(mx,my,mw,mh);ctx.fillStyle='#60dc8c';ctx.fillRect(mx+safe.x/(MAPW*TILE)*mw-3,my+safe.y/(MAPH*TILE)*mh-3,6,6);ctx.fillStyle='#ff6666';for(const z of zombies){ctx.fillRect(mx+z.x/(MAPW*TILE)*mw-1,my+z.y/(MAPH*TILE)*mh-1,3,3)}ctx.fillStyle='#fff';ctx.fillRect(mx+player.x/(MAPW*TILE)*mw-2,my+player.y/(MAPH*TILE)*mh-2,4,4);
+ if(messageUntil<performance.now())document.getElementById('message').style.display='none';
+}
+let prev=performance.now();function loop(now){let dt=Math.min(.033,(now-prev)/1000);prev=now;if(!shopOpen&&!dead){if(mouse.down)shoot();update(dt)}draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);
+addEventListener('keydown',e=>{keys[e.code]=true;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();if(e.code==='KeyE'){if(shopOpen)closeShop();else openShop()}if(e.code==='Space')melee();if(e.code==='KeyF'&&food>0){food--;player.hp=Math.min(10,player.hp+2);say('🍎 +2 Herzen geheilt!');updateHud()}if(e.code==='Escape')closeShop()});
+addEventListener('keyup',e=>keys[e.code]=false);
+canvas.addEventListener('mousemove',e=>{mouse.x=e.clientX;mouse.y=e.clientY});canvas.addEventListener('mousedown',e=>{mouse.down=true;if(e.button===0)shoot()});addEventListener('mouseup',()=>mouse.down=false);
+canvas.addEventListener('touchstart',e=>{if(e.target===canvas){const t=e.changedTouches[0];mouse.x=t.clientX;mouse.y=t.clientY;mouse.down=true;shoot()}},{passive:false});canvas.addEventListener('touchend',()=>mouse.down=false);
+document.getElementById('meleeBtn').onclick=melee;document.getElementById('shopBtn').onclick=()=>shopOpen?closeShop():openShop();document.getElementById('foodBtn').onclick=()=>{if(food>0){food--;player.hp=Math.min(10,player.hp+2);say('🍎 +2 Herzen geheilt!');updateHud()}else say('Du hast kein eingesammeltes Essen!')};document.getElementById('fireBtn').onpointerdown=()=>{fireHeld=true;mouse.down=true};document.getElementById('fireBtn').onpointerup=()=>{fireHeld=false;mouse.down=false};
+const pad=document.getElementById('pad'),stick=document.getElementById('stick');let padId=null;
+pad.addEventListener('pointerdown',e=>{padId=e.pointerId;pad.setPointerCapture(e.pointerId);handlePad(e)});pad.addEventListener('pointermove',e=>{if(e.pointerId===padId)handlePad(e)});function handlePad(e){const r=pad.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;let dx=e.clientX-cx,dy=e.clientY-cy,l=Math.hypot(dx,dy),max=39;if(l>max){dx=dx/l*max;dy=dy/l*max}move={x:dx/max,y:dy/max};stick.style.left=(35+dx)+'px';stick.style.top=(35+dy)+'px'}function resetPad(){padId=null;move={x:0,y:0};stick.style.left='35px';stick.style.top='35px'}pad.addEventListener('pointerup',resetPad);pad.addEventListener('pointercancel',resetPad);
+updateHud();
+})();
+</script>
+</body>
+</html>
