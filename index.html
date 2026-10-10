@@ -9,7 +9,7 @@
 <script>
 (()=>{
 const canvas=document.getElementById('view'),ctx=canvas.getContext('2d',{alpha:false});let W=innerWidth,H=innerHeight,dpr=1;function resize(){dpr=Math.min(devicePixelRatio||1,1.5);W=innerWidth;H=innerHeight;canvas.width=Math.floor(W*dpr);canvas.height=Math.floor(H*dpr);canvas.style.width=W+'px';canvas.style.height=H+'px';ctx.setTransform(dpr,0,0,dpr,0,0)}addEventListener('resize',resize);resize();
-const TAU=Math.PI*2,FOV=Math.PI*.39,GRID=64;let map=[],player,zombies=[],particles=[],projectiles=[],effects=[],loot=[],storedWeapons=Array(17).fill(false),running=false,dead=false,coins=35,kills=0,armor=0,medkits=1,selected=0,shotAt=0,recoil=0,damageFlash=0,walkPhase=0,lastTime=0,spawnTimer=0,mouseDown=false,keys={},soundOn=true,audio=null,fireTouch=false,joy={x:0,y:0},lookTouch=false,lastTouchX=0,lastTouchY=0,pitch=0,jumpZ=0,jumpVel=0,reloadUntil=0,muzzleFlashUntil=0,meleeSwing=0,zoomed=false,scopeKick=0;const weapons=[
+const TAU=Math.PI*2,FOV=Math.PI*.39,GRID=64;let map=[],interiorMap=[],player,zombies=[],particles=[],projectiles=[],effects=[],loot=[],storedWeapons=Array(17).fill(false),running=false,dead=false,coins=35,kills=0,armor=0,medkits=1,selected=0,shotAt=0,recoil=0,damageFlash=0,walkPhase=0,lastTime=0,spawnTimer=0,mouseDown=false,keys={},soundOn=true,audio=null,fireTouch=false,joy={x:0,y:0},lookTouch=false,lastTouchX=0,lastTouchY=0,pitch=0,jumpZ=0,jumpVel=0,reloadUntil=0,muzzleFlashUntil=0,meleeSwing=0,zoomed=false,scopeKick=0;const weapons=[
 {name:'PISTOLE',short:'PST',damage:24,rate:300,mag:12,reserve:60,spread:.035,color:'#d9c7a0',price:0,desc:'Startwaffe · zuverlässig und einfach',glyph:'▰'},
 {name:'MASCHINENPISTOLE',short:'SMG',damage:14,rate:90,mag:30,reserve:150,spread:.075,color:'#b4c3cc',price:90,desc:'Sehr schnell, mehr Streuung',glyph:'▰≋'},
 {name:'STURMGEWEHR',short:'AR',damage:23,rate:155,mag:24,reserve:120,spread:.028,color:'#8da69b',price:165,desc:'Präzise und kräftig',glyph:'╋'},
@@ -36,11 +36,39 @@ function saveProgress(){if(!player)return;try{localStorage.setItem(SAVE_KEY,JSON
 const grassCanvas=document.createElement('canvas');grassCanvas.width=grassCanvas.height=128;const grassCtx=grassCanvas.getContext('2d');grassCtx.fillStyle='#4a873b';grassCtx.fillRect(0,0,128,128);
 // Quiet green mottling instead of a checkerboard, with small pixel blades of grass.
 for(let gi=0;gi<135;gi++){const gx=(gi*43+17)%128,gy=(gi*67+9)%128;grassCtx.fillStyle=['#43803a','#528e42','#4f8b3d','#3e7936','#5a9445'][gi%5];grassCtx.fillRect(gx,gy,2+(gi%3),1+(gi%3));if(gi%2===0){grassCtx.fillStyle='#76ad4d';grassCtx.fillRect(gx+1,gy-2,1,3);grassCtx.fillRect(gx+2,gy-1,1,2)}if(gi%5===0){grassCtx.fillStyle='#2f6b31';grassCtx.fillRect(gx-1,gy+2,1,2)}}
-// Just two tiny flowers per texture tile; larger flowers are individual world objects.
-for(let fi=0;fi<2;fi++){let fx=(fi*61+24)%124,fy=(fi*47+31)%122;grassCtx.fillStyle='#e6f0d5';grassCtx.fillRect(fx,fy,3,3);grassCtx.fillStyle=fi?'#f3c5df':'#f4dc69';grassCtx.fillRect(fx+1,fy-2,2,2);grassCtx.fillRect(fx+1,fy+3,2,2);grassCtx.fillRect(fx-2,fy,2,2);grassCtx.fillRect(fx+3,fy,2,2);grassCtx.fillStyle='#d6b247';grassCtx.fillRect(fx+1,fy+1,1,1)}
-function drawGrass(horizon){const top=Math.max(0,Math.min(H,horizon));if(top>=H)return;ctx.save();ctx.globalAlpha=.98;ctx.fillStyle=ctx.createPattern(grassCanvas,'repeat');ctx.fillRect(0,top,W,H-top);ctx.restore()}
+// Flowers are placed as individual world objects and rendered as small voxel plants.
+function drawGrass(horizon,vfov){
+ const top=Math.max(0,Math.min(H,horizon));if(top>=H)return;
+ ctx.fillStyle='#4b873d';ctx.fillRect(0,top,W,H-top);
+ // Perspective-cast the ground into world coordinates. Grass and floor tiles stay put as the player turns.
+ const sxStep=Math.max(4,Math.ceil(W/220)),syStep=Math.max(4,Math.ceil(H/170)),focal=W/(2*Math.tan(vfov/2));
+ const greens=['#4a843c','#4d873e','#4a833b','#4f8840','#4b853d','#4d853c','#49813a','#518941'];
+ for(let py=Math.max(0,Math.floor(top));py<H;py+=syStep){
+  const dist=Math.min(70,(H*.40)/Math.max(1,py+syStep*.5-horizon));
+  for(let px=0;px<W;px+=sxStep){
+   const a=player.a-vfov/2+((px+sxStep*.5)/W)*vfov;
+   const gx=player.x+Math.cos(a)*dist,gy=player.y+Math.sin(a)*dist,ix=Math.floor(gx),iy=Math.floor(gy);
+   if(interiorMap[iy]?.[ix]){
+    const tx=Math.floor(gx*2),ty=Math.floor(gy*2),fractX=((gx*2)%1+1)%1,fractY=((gy*2)%1+1)%1;
+    const grout=fractX<.035||fractY<.035;
+    const variation=((tx*13+ty*7)%5+5)%5;
+    ctx.fillStyle=grout?'#454b4e':['#858b8c','#929899','#7f8688','#a1a5a4','#898f90'][variation];
+   }else{
+    // Each world block gets one stable grass shade; a few small texture flecks add blades without a checkerboard.
+    const tx=ix,ty=iy;let hash=(Math.imul(tx|0,374761393)+Math.imul(ty|0,668265263))|0;hash=Math.imul(hash^(hash>>>13),1274126177);hash=(hash^(hash>>>16))&7;
+    const fx=((gx%1)+1)%1,fy=((gy%1)+1)%1;
+    const subX=Math.floor(gx*6),subY=Math.floor(gy*6);let fleck=(Math.imul(subX|0,1597334677)^Math.imul(subY|0,3812015801))|0;fleck=Math.imul(fleck^(fleck>>>15),2246822519);fleck=(fleck^(fleck>>>13))>>>0;
+    ctx.fillStyle=fleck%13===0?(['#57934a','#477f38','#60964a'][fleck%3]):greens[hash];
+   }
+   ctx.fillRect(px,py,sxStep,syStep);
+   // A few tiny grass blades are world-locked speckles, not screen-following sprites.
+   const bladeHash=((Math.floor(gx*11)*17+Math.floor(gy*13)*29)%19+19)%19;
+   if(!interiorMap[iy]?.[ix]&&bladeHash===0&&py>top+syStep*2){ctx.fillStyle='#72a94b';ctx.fillRect(px+sxStep*.35,py+syStep*.18,1,Math.max(2,syStep*.55));}
+  }
+ }
+}
 function freshMap(){
- nature=[];map=Array.from({length:GRID},(_,y)=>Array.from({length:GRID},(_,x)=>(x===0||y===0||x===GRID-1||y===GRID-1)?1:0));
+ nature=[];map=Array.from({length:GRID},(_,y)=>Array.from({length:GRID},(_,x)=>(x===0||y===0||x===GRID-1||y===GRID-1)?1:0));interiorMap=Array.from({length:GRID},()=>Array(GRID).fill(false));
  const buildings=[];
  // Broad paved lanes and cross streets make the expanded map readable; no random cube piles.
  for(const x of [9,25,43,57])for(let y=1;y<GRID-1;y++)map[y][x]=0;
@@ -50,7 +78,7 @@ function freshMap(){
    buildings.push({x,y,w,h});
    for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++){
      const edge=xx===x||xx===x+w-1||yy===y||yy===y+h-1;
-     if(!edge)map[yy][xx]=0;
+     if(!edge){map[yy][xx]=0;interiorMap[yy][xx]=true;}
      else map[yy][xx]=((xx===x||xx===x+w-1)&&(yy===y||yy===y+h-1))?4:brick;
    }
    // Two levels of window panels on the outside walls, with solid narrow piers between.
@@ -142,20 +170,76 @@ function update(dt){if(!running||dead)return;saveTimer+=dt;if(saveTimer>=1){save
  for(const z of burnedDead)defeatZombie(z,'🔥 VERBRANNT');
  for(let i=loot.length-1;i>=0;i--){let l=loot[i];l.life-=dt;if(Math.hypot(l.x-player.x,l.y-player.y)<.5){if(l.type==='coin'){coins+=5;tone(650,.08,'sine',.035,900)}else{player.medkits++;say('Medkit eingesammelt!')}saveProgress();loot.splice(i,1);updateHud()}else if(l.life<=0)loot.splice(i,1)}updateHud()}
 // Drawing: classic textured raycaster with first-person horizon, depth shading, wall highlights and weapon model.
-function render(){let horizon=H*.47+pitch+jumpZ*21+(zoomed&&selected===4?scopeKick:0);const vfov=currentFov();let sky=ctx.createLinearGradient(0,0,0,horizon);sky.addColorStop(0,'#111c2c');sky.addColorStop(.65,'#30434a');sky.addColorStop(1,'#7a7864');ctx.fillStyle=sky;ctx.fillRect(0,0,W,horizon);let floor=ctx.createLinearGradient(0,Math.max(0,horizon),0,H);floor.addColorStop(0,'#568849');floor.addColorStop(.35,'#397238');floor.addColorStop(1,'#173b25');ctx.fillStyle=floor;ctx.fillRect(0,Math.max(0,horizon),W,Math.max(0,H-Math.max(0,horizon)));drawGrass(horizon)
+
+// Minecraft-like plants are built from fixed world-space cuboids rather than camera-facing billboards.
+function drawVoxelNature(obj,type,horizon,vfov,depth,strip){
+ const focal=W/(2*Math.tan(vfov/2));
+ function project(x,y,z){
+  const dx=x-player.x,dy=y-player.y,forward=dx*Math.cos(player.a)+dy*Math.sin(player.a),side=-dx*Math.sin(player.a)+dy*Math.cos(player.a);
+  if(forward<.14)return null;const sx=W/2+side*focal/forward,idx=Math.max(0,Math.min(depth.length-1,Math.floor(sx/strip)));
+  if(sx<-160||sx>W+160||forward>depth[idx]+.30)return null;
+  const unit=H/(forward+.15)*.8,base=horizon+Math.min(H*.58,H/(forward+.15)*.384);
+  return {x:sx,y:base-z*unit,forward,unit};
+ }
+ function poly(points,color,outline='#172b1d'){
+  const q=points.map(p=>project(p[0],p[1],p[2]));if(q.some(p=>!p))return;
+  ctx.beginPath();ctx.moveTo(q[0].x,q[0].y);for(let i=1;i<q.length;i++)ctx.lineTo(q[i].x,q[i].y);ctx.closePath();ctx.fillStyle=color;ctx.fill();if(outline){ctx.strokeStyle=outline;ctx.lineWidth=Math.max(.35,Math.min(1.2,H/(q.reduce((a,p)=>a+p.forward,0)/q.length+.15)*.006));ctx.stroke()}
+ }
+ function cube(cx,cy,z,w,d,h,top,sideX,sideY,dark){
+  const x0=cx-w/2,x1=cx+w/2,y0=cy-d/2,y1=cy+d/2,z0=z,z1=z+h;
+  // faces are chosen by the camera's world-space side, so the tree silhouette does not turn with the player.
+  if(player.x>=cx)poly([[x1,y0,z0],[x1,y1,z0],[x1,y1,z1],[x1,y0,z1]],sideX,dark);
+  else poly([[x0,y1,z0],[x0,y0,z0],[x0,y0,z1],[x0,y1,z1]],sideX,dark);
+  if(player.y>=cy)poly([[x0,y1,z0],[x1,y1,z0],[x1,y1,z1],[x0,y1,z1]],sideY,dark);
+  else poly([[x1,y0,z0],[x0,y0,z0],[x0,y0,z1],[x1,y0,z1]],sideY,dark);
+  poly([[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]],top,dark);
+ }
+ const x=obj.x,y=obj.y;
+ if(type==='tree'){
+  cube(x,y,0,.32,.32,.44,'#9b7644','#76502e','#875d35','#3d3928');
+  cube(x,y,.43,.32,.32,.44,'#a27b47','#76502e','#8b6035','#3d3928');
+  cube(x,y,.86,.32,.32,.40,'#a57e4a','#704a2b','#895b32','#3d3928');
+  cube(x,y,1.02,.92,.92,.58,'#4d8742','#2d6736','#3b7540','#1b4028');
+  cube(x-.36,y,1.22,.72,.78,.58,'#5a9547','#326b38','#447e3f','#1e4829');
+  cube(x+.34,y+.08,1.20,.75,.72,.57,'#427b3b','#275d31','#346c35','#1d4528');
+  cube(x,y-.33,1.34,.72,.70,.55,'#5a9346','#2e6634','#40783b','#1d4627');
+  cube(x,y+.30,1.32,.72,.70,.55,'#3e773a','#285b30','#316834','#1b4227');
+  cube(x,y,1.72,.64,.64,.52,'#659e4b','#38733a','#4a8440','#1e492a');
+ }else if(type==='bush'){
+  cube(x,y,.04,.72,.65,.34,'#336d37','#24572f','#2c6131','#183f25');
+  cube(x-.20,y-.04,.28,.49,.50,.34,'#4e8940','#2c6633','#3b7738','#1e4928');
+  cube(x+.19,y+.07,.27,.48,.48,.32,'#5c9648','#326f37','#44803d','#1e4928');
+  cube(x,y-.16,.40,.44,.43,.29,'#629d4a','#347139','#48813e','#214d2b');
+ }else if(type==='hedge'){
+  cube(x,y,.02,.96,.82,.42,'#346d37','#23532c','#2e6031','#173f23');
+  cube(x-.20,y,.36,.58,.76,.32,'#4a843d','#2b6231','#386f36','#1c4527');
+  cube(x+.22,y+.02,.36,.58,.76,.32,'#548d40','#2c6230','#3a7135','#1c4527');
+  cube(x,y,.56,.74,.72,.20,'#609447','#316d36','#477e3b','#1d4728');
+ }else if(type==='flower'){
+  const petal=obj.color||'#f6e27a';cube(x,y,.02,.045,.045,.20,'#4a7d39','#315f30','#3b6e34','#224526');
+  cube(x-.045,y,.20,.10,.10,.09,petal,petal,'#cfad70','#7b633c');cube(x+.045,y,.20,.10,.10,.09,petal,petal,'#cfad70','#7b633c');cube(x,y-.045,.20,.10,.10,.09,petal,petal,'#cfad70','#7b633c');cube(x,y+.045,.20,.10,.10,.09,petal,petal,'#cfad70','#7b633c');cube(x,y,.24,.075,.075,.07,'#d6b747','#a98532','#b99535','#755a26');
+ }
+}
+
+function render(){let horizon=H*.47+pitch+jumpZ*21+(zoomed&&selected===4?scopeKick:0);const vfov=currentFov();let sky=ctx.createLinearGradient(0,0,0,horizon);sky.addColorStop(0,'#111c2c');sky.addColorStop(.65,'#30434a');sky.addColorStop(1,'#7a7864');ctx.fillStyle=sky;ctx.fillRect(0,0,W,horizon);let floor=ctx.createLinearGradient(0,Math.max(0,horizon),0,H);floor.addColorStop(0,'#568849');floor.addColorStop(.35,'#397238');floor.addColorStop(1,'#173b25');ctx.fillStyle=floor;ctx.fillRect(0,Math.max(0,horizon),W,Math.max(0,H-Math.max(0,horizon)));drawGrass(horizon,vfov)
 // Sky, Horizon und Boden rendern ohne einen Lichtstrahl über der Basis.
-const rays=Math.min(Math.ceil(W/2),760),strip=W/rays,depth=new Float32Array(rays);for(let i=0;i<rays;i++){let a=player.a-vfov/2+(i/rays)*vfov,hit=cast(a,24),dist=hit.d*Math.cos(a-player.a);depth[i]=dist;let tile=map[Math.floor(hit.y)]?.[Math.floor(hit.x)]||1;const buildingHeight=(tile===3||tile===4||tile===5)?1.42:1;let wallH=Math.min(H*2,H/(dist+.0001)*.88*buildingHeight),top=horizon-wallH/2;let px=i*strip,frac=hit.side===0?((hit.y%1)+1)%1:((hit.x%1)+1)%1,shade=Math.max(.24,1-dist/19)*(hit.side?.78:1),rowY=0;ctx.fillStyle=`rgb(${(98*shade)|0},${(105*shade)|0},${(103*shade)|0})`;ctx.fillRect(px,top,strip+1,wallH);
+const rays=Math.min(Math.ceil(W/2),760),strip=W/rays,depth=new Float32Array(rays);for(let i=0;i<rays;i++){let a=player.a-vfov/2+(i/rays)*vfov,hit=cast(a,24),dist=hit.d*Math.cos(a-player.a);depth[i]=dist;let tile=map[Math.floor(hit.y)]?.[Math.floor(hit.x)]||1;const buildingHeight=(tile===3||tile===4||tile===5)?4.26:1;let wallH=Math.min(H*2,H/(dist+.0001)*.88*buildingHeight),top=horizon-wallH/2;let px=i*strip,frac=hit.side===0?((hit.y%1)+1)%1:((hit.x%1)+1)%1,shade=Math.max(.24,1-dist/19)*(hit.side?.78:1),rowY=0;ctx.fillStyle=`rgb(${(98*shade)|0},${(105*shade)|0},${(103*shade)|0})`;ctx.fillRect(px,top,strip+1,wallH);
  if(tile===2){const baseY=top+wallH,post=frac<.14||frac>.86;ctx.fillStyle=`rgba(${(70*shade)|0},${(46*shade)|0},${(25*shade)|0},.98)`;if(post)ctx.fillRect(px,baseY-wallH*.82,strip+1,wallH*.82);ctx.fillStyle=`rgb(${(155*shade)|0},${(105*shade)|0},${(54*shade)|0})`;ctx.fillRect(px,baseY-wallH*.66,strip+1,wallH*.10);ctx.fillRect(px,baseY-wallH*.36,strip+1,wallH*.10);ctx.fillStyle=`rgba(235,188,113,${.24*shade})`;ctx.fillRect(px,baseY-wallH*.66,strip,1);ctx.fillRect(px,baseY-wallH*.36,strip,1)
  }else if(tile===3){ // intact red brick mansion facade with three-storey courses
-   const brickPalette=['#a64e3b','#b45a43','#91412f','#bc6650'];ctx.fillStyle=brickPalette[(Math.floor(frac*5)+Math.floor(hit.y*3))%brickPalette.length];ctx.fillRect(px,top,strip+1,wallH);ctx.fillStyle=`rgba(229,187,154,${.68*shade})`;for(let k=1;k<7;k++)if(k%2===0)ctx.fillRect(px,top+wallH*k/7,strip+1,Math.max(1,wallH*.007));if(Math.floor(frac*6)%2===0){ctx.fillStyle=`rgba(82,39,31,${.55*shade})`;ctx.fillRect(px,top+wallH*.16,strip+1,Math.max(1,wallH*.01));ctx.fillRect(px,top+wallH*.49,strip+1,Math.max(1,wallH*.01));ctx.fillRect(px,top+wallH*.81,strip+1,Math.max(1,wallH*.01))}ctx.fillStyle=`rgba(60,40,34,${.28*shade})`;ctx.fillRect(px,top,strip+1,wallH*.025)
+   const brickPalette=['#a64e3b','#b45a43','#91412f','#bc6650'];ctx.fillStyle=brickPalette[(Math.floor(frac*5)+Math.floor(hit.y*3))%brickPalette.length];ctx.fillRect(px,top,strip+1,wallH);ctx.fillStyle=`rgba(229,187,154,${.68*shade})`;for(let k=1;k<19;k++)if(k%2===0)ctx.fillRect(px,top+wallH*k/19,strip+1,Math.max(1,wallH*.004));if(Math.floor(frac*6)%2===0){ctx.fillStyle=`rgba(82,39,31,${.55*shade})`;ctx.fillRect(px,top+wallH*.16,strip+1,Math.max(1,wallH*.01));ctx.fillRect(px,top+wallH*.49,strip+1,Math.max(1,wallH*.01));ctx.fillRect(px,top+wallH*.81,strip+1,Math.max(1,wallH*.01))}ctx.fillStyle=`rgba(60,40,34,${.28*shade})`;ctx.fillRect(px,top,strip+1,wallH*.025)
  }else if(tile===4){ // pale stone pilasters, sills and corner trim
    ctx.fillStyle=`rgb(${(194*shade)|0},${(190*shade)|0},${(174*shade)|0})`;ctx.fillRect(px,top,strip+1,wallH);ctx.fillStyle=`rgba(90,92,83,${.45*shade})`;for(let k=1;k<6;k++)ctx.fillRect(px,top+wallH*k/6,strip+1,Math.max(1,wallH*.008));ctx.fillStyle=`rgba(240,235,217,${.25*shade})`;ctx.fillRect(px,top,strip+1,wallH*.025)
- }else if(tile===5){ // windows are blue glass with visible stone frames, not black cubes
-   ctx.fillStyle=`rgb(${(47*shade)|0},${(76*shade)|0},${(91*shade)|0})`;ctx.fillRect(px,top,strip+1,wallH);ctx.fillStyle=`rgba(146,205,218,${.8*shade})`;ctx.fillRect(px,top+wallH*.12,strip+1,wallH*.76);ctx.fillStyle=`rgba(225,229,209,${.8*shade})`;ctx.fillRect(px,top+wallH*.10,strip+1,Math.max(2,wallH*.07));ctx.fillRect(px,top+wallH*.48,strip+1,Math.max(1,wallH*.025));ctx.fillRect(px,top+wallH*.84,strip+1,Math.max(2,wallH*.07));ctx.fillStyle=`rgba(70,93,101,${.9*shade})`;ctx.fillRect(px,top+wallH*.50,strip+1,Math.max(1,wallH*.025))
+ }else if(tile===5){ // Three-storey window stack with stone frames and blue glass panes
+   ctx.fillStyle=`rgb(${(139*shade)|0},${(135*shade)|0},${(119*shade)|0})`;ctx.fillRect(px,top,strip+1,wallH);
+   const onFrame=frac<.14||frac>.86;
+   for(let floorN=0;floorN<3;floorN++){const fy=top+wallH*(.08+floorN*.31),fh=wallH*.20;
+     if(!onFrame){ctx.fillStyle=`rgb(${(38*shade)|0},${(62*shade)|0},${(73*shade)|0})`;ctx.fillRect(px,fy,strip+1,fh);ctx.fillStyle=`rgba(128,199,218,${.82*shade})`;ctx.fillRect(px,fy+fh*.07,strip+1,fh*.82);ctx.fillStyle=`rgba(222,230,213,${.84*shade})`;ctx.fillRect(px,fy,strip+1,Math.max(1,fh*.09));ctx.fillRect(px,fy+fh*.91,strip+1,Math.max(1,fh*.09));ctx.fillStyle=`rgba(61,86,93,${.9*shade})`;ctx.fillRect(px,fy+fh*.5,strip+1,Math.max(1,fh*.035));}
+     else{ctx.fillStyle=`rgba(214,207,184,${.92*shade})`;ctx.fillRect(px,fy,strip+1,fh);ctx.fillStyle=`rgba(75,81,77,${.72*shade})`;ctx.fillRect(px,fy+fh*.10,strip+1,fh*.78)}
+   }ctx.fillStyle=`rgba(239,232,213,${.8*shade})`;ctx.fillRect(px,top,strip+1,wallH*.035);ctx.fillRect(px,top+wallH*.965,strip+1,wallH*.035);
  }else{ctx.fillStyle=`rgb(${(104*shade)|0},${(112*shade)|0},${(111*shade)|0})`;ctx.fillRect(px,top,strip+1,wallH);ctx.fillStyle=`rgba(175,185,177,${.2*shade})`;for(let k=1;k<5;k++)ctx.fillRect(px,top+wallH*k/5,strip+1,Math.max(1,wallH*.008));ctx.fillStyle=`rgba(17,27,29,${.18*shade})`;if(Math.floor(frac*4)%3===0)ctx.fillRect(px,top+wallH*.36,strip+1,Math.max(1,wallH*.02))}
  }
 // small distant silhouettes/loot as billboards, painter's order
-let sprites=[];{let v=visible(shopkeeper);if(Math.abs(v.ang)<vfov*.7&&v.dist<10)sprites.push({type:'shopkeeper',obj:shopkeeper,...v})}{let v=visible(storageChest);if(Math.abs(v.ang)<vfov*.7&&v.dist<10)sprites.push({type:'chest',obj:storageChest,...v})}for(let n of nature){let dx=n.x-player.x,dy=n.y-player.y,d=Math.hypot(dx,dy),a=Math.atan2(dy,dx)-player.a;while(a>Math.PI)a-=TAU;while(a< -Math.PI)a+=TAU;if(Math.abs(a)<vfov*.7&&d<18)sprites.push({type:n.type,obj:n,dist:d,ang:a})}for(let z of zombies){let v=visible(z);if(Math.abs(v.ang)<vfov*.7&&v.dist<14)sprites.push({type:'z',obj:z,...v})}for(let l of loot){let dx=l.x-player.x,dy=l.y-player.y,d=Math.hypot(dx,dy),a=Math.atan2(dy,dx)-player.a;while(a>Math.PI)a-=TAU;while(a< -Math.PI)a+=TAU;if(Math.abs(a)<vfov*.7&&d<12)sprites.push({type:l.type,obj:l,dist:d,ang:a})}for(let p of particles){let dx=p.x-player.x,dy=p.y-player.y,d=Math.hypot(dx,dy),a=Math.atan2(dy,dx)-player.a;while(a>Math.PI)a-=TAU;while(a< -Math.PI)a+=TAU;if(Math.abs(a)<vfov*.8&&d<20)sprites.push({type:'particle',obj:p,dist:d,ang:a})}for(let p of projectiles){let v=visible(p);if(Math.abs(v.ang)<vfov*.8&&v.dist<20)sprites.push({type:'projectile',obj:p,...v})}for(let e of effects){let v=visible(e);if(Math.abs(v.ang)<vfov*.8&&v.dist<18)sprites.push({type:'effect',obj:e,...v})}sprites.sort((a,b)=>b.dist-a.dist);for(let s of sprites){let sx=(.5+s.ang/vfov)*W,idx=Math.max(0,Math.min(rays-1,Math.floor(sx/strip)));if(s.dist>depth[idx]+.25)continue;let size=Math.min(H*1.2,H/(s.dist+.15)*.8);if(s.type==='effect')size=Math.min(H*1.2,H/(s.dist+.15)*.9);else if(s.type==='tree')size*=2.18;else if(s.type==='bush')size*=1.28;else if(s.type==='hedge')size*=1.75;else if(s.type==='flower')size*=.48;else if(s.type==='z')size*=s.obj.size||1;let base=horizon+size*.48,xx=sx-size*.22,yy=base-size; if(s.type==='tree'||s.type==='bush'||s.type==='hedge'||s.type==='flower'){ctx.save();ctx.translate(sx,base);if(s.type==='flower'){const f=size;ctx.fillStyle='#285d2e';ctx.fillRect(-f*.018,-f*.28,f*.036,f*.28);ctx.fillStyle='#63a84b';ctx.fillRect(-f*.12,-f*.16,f*.10,f*.05);ctx.fillRect(f*.02,-f*.22,f*.10,f*.05);ctx.fillStyle=s.obj.color||'#f6e27a';ctx.fillRect(-f*.14,-f*.38,f*.28,f*.12);ctx.fillRect(-f*.07,-f*.47,f*.14,f*.30);ctx.fillStyle='#fff1ba';ctx.fillRect(-f*.045,-f*.35,f*.09,f*.09);ctx.fillStyle='#c5a348';ctx.fillRect(-f*.025,-f*.34,f*.05,f*.05)}else if(s.type==='tree'){ctx.fillStyle='#4c3525';ctx.fillRect(-size*.085,-size*.54,size*.17,size*.54);ctx.fillStyle='#173d2b';ctx.fillRect(-size*.34,-size*.67,size*.68,size*.28);ctx.fillStyle='#245538';ctx.fillRect(-size*.39,-size*.79,size*.78,size*.23);ctx.fillStyle='#386a42';ctx.fillRect(-size*.28,-size*.90,size*.56,size*.16);ctx.fillStyle='#6b9445';ctx.fillRect(-size*.24,-size*.74,size*.13,size*.08);ctx.fillStyle='#37663c';ctx.fillRect(size*.17,-size*.83,size*.13,size*.10)}else if(s.type==='hedge'){ctx.fillStyle='#21472a';ctx.fillRect(-size*.38,-size*.34,size*.76,size*.34);ctx.fillStyle='#32683a';ctx.fillRect(-size*.33,-size*.43,size*.66,size*.20);ctx.fillStyle='#4d8041';ctx.fillRect(-size*.22,-size*.44,size*.18,size*.08);ctx.fillRect(size*.09,-size*.39,size*.16,size*.07)}else{ctx.fillStyle='#234b2e';ctx.fillRect(-size*.32,-size*.28,size*.64,size*.25);ctx.fillStyle='#396d3b';ctx.fillRect(-size*.22,-size*.38,size*.44,size*.19);ctx.fillStyle='#6b9445';ctx.fillRect(-size*.09,-size*.38,size*.10,size*.07)}ctx.restore()}else if(s.type==='shopkeeper'){ctx.save();ctx.translate(sx,base);const k=size;ctx.fillStyle='#0006';ctx.beginPath();ctx.ellipse(0,0,k*.24,k*.055,0,0,TAU);ctx.fill();
+let sprites=[];{let v=visible(shopkeeper);if(Math.abs(v.ang)<vfov*.7&&v.dist<10)sprites.push({type:'shopkeeper',obj:shopkeeper,...v})}{let v=visible(storageChest);if(Math.abs(v.ang)<vfov*.7&&v.dist<10)sprites.push({type:'chest',obj:storageChest,...v})}for(let n of nature){let dx=n.x-player.x,dy=n.y-player.y,d=Math.hypot(dx,dy),a=Math.atan2(dy,dx)-player.a;while(a>Math.PI)a-=TAU;while(a< -Math.PI)a+=TAU;if(Math.abs(a)<vfov*.7&&d<18)sprites.push({type:n.type,obj:n,dist:d,ang:a})}for(let z of zombies){let v=visible(z);if(Math.abs(v.ang)<vfov*.7&&v.dist<14)sprites.push({type:'z',obj:z,...v})}for(let l of loot){let dx=l.x-player.x,dy=l.y-player.y,d=Math.hypot(dx,dy),a=Math.atan2(dy,dx)-player.a;while(a>Math.PI)a-=TAU;while(a< -Math.PI)a+=TAU;if(Math.abs(a)<vfov*.7&&d<12)sprites.push({type:l.type,obj:l,dist:d,ang:a})}for(let p of particles){let dx=p.x-player.x,dy=p.y-player.y,d=Math.hypot(dx,dy),a=Math.atan2(dy,dx)-player.a;while(a>Math.PI)a-=TAU;while(a< -Math.PI)a+=TAU;if(Math.abs(a)<vfov*.8&&d<20)sprites.push({type:'particle',obj:p,dist:d,ang:a})}for(let p of projectiles){let v=visible(p);if(Math.abs(v.ang)<vfov*.8&&v.dist<20)sprites.push({type:'projectile',obj:p,...v})}for(let e of effects){let v=visible(e);if(Math.abs(v.ang)<vfov*.8&&v.dist<18)sprites.push({type:'effect',obj:e,...v})}sprites.sort((a,b)=>b.dist-a.dist);for(let s of sprites){let sx=(.5+s.ang/vfov)*W,idx=Math.max(0,Math.min(rays-1,Math.floor(sx/strip)));if(s.dist>depth[idx]+.25)continue;let size=Math.min(H*1.2,H/(s.dist+.15)*.8);if(s.type==='effect')size=Math.min(H*1.2,H/(s.dist+.15)*.9);else if(s.type==='tree')size*=2.18;else if(s.type==='bush')size*=1.28;else if(s.type==='hedge')size*=1.75;else if(s.type==='flower')size*=.48;else if(s.type==='z')size*=s.obj.size||1;let base=horizon+Math.min(H*.58,H/(s.dist+.15)*.384),xx=sx-size*.22,yy=base-size; if(s.type==='tree'||s.type==='bush'||s.type==='hedge'||s.type==='flower'){drawVoxelNature(s.obj,s.type,horizon,vfov,depth,strip)}else if(s.type==='shopkeeper'){ctx.save();ctx.translate(sx,base);const k=size;ctx.fillStyle='#0006';ctx.beginPath();ctx.ellipse(0,0,k*.24,k*.055,0,0,TAU);ctx.fill();
  // boots and trousers
  ctx.fillStyle='#293947';ctx.fillRect(-k*.16,-k*.24,k*.12,k*.23);ctx.fillRect(k*.04,-k*.24,k*.12,k*.23);ctx.fillStyle='#171f25';ctx.fillRect(-k*.18,-k*.035,k*.16,k*.045);ctx.fillRect(k*.025,-k*.035,k*.16,k*.045);
  // jacket, arms and merchant apron
@@ -186,7 +270,7 @@ let sprites=[];{let v=visible(shopkeeper);if(Math.abs(v.ang)<vfov*.7&&v.dist<10)
  // Class health bars and names: brutes and bosses are unmistakable
  if(kind!=='walker'&&kind!=='runner'){const barW=scale*(kind==='boss'?.66:.52),barY=headTop-scale*.12;ctx.fillStyle='#1a211d';ctx.fillRect(-barW/2,barY,barW,Math.max(3,scale*.025));ctx.fillStyle=kind==='boss'?'#ff4439':kind==='brute'?'#e28a37':kind==='toxic'?'#b7ee48':'#e1c56b';ctx.fillRect(-barW/2,barY,barW*Math.max(0,z.hp/z.maxHp),Math.max(3,scale*.025));ctx.fillStyle=kind==='boss'?'#ffb6a8':'#edf4de';ctx.font=`bold ${Math.max(8,Math.min(15,scale*.065))}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(kind==='boss'?'BOSS':kind==='brute'?'BRUT':z.label.toUpperCase(),0,barY-scale*.045)}ctx.restore()}else{ctx.save();ctx.translate(sx,base-size*.12);ctx.fillStyle=s.type==='med'?'#68e2a0':'#f4c75c';ctx.shadowColor=ctx.fillStyle;ctx.shadowBlur=14;ctx.fillRect(-size*.12,-size*.12,size*.24,size*.24);ctx.shadowBlur=0;ctx.restore()}}
 // Safe-zone status badge
-{ctx.save();ctx.fillStyle=inSafeZone()?'#06251bdc':'#101923d9';ctx.strokeStyle=inSafeZone()?'#66ffae':'#8aa0ad';ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(W/2-124,78,248,44,10);ctx.fill();ctx.stroke();ctx.fillStyle=inSafeZone()?'#9dffc8':'#e1eaf0';ctx.font='bold 14px system-ui';ctx.textAlign='center';ctx.fillText(inSafeZone()?'🛡 SAFE ZONE · SHOP + WAFFENKISTE':'T = ZUR SAFE ZONE · SHOP-BUTTON',W/2,105);ctx.restore()}
+{ctx.save();ctx.fillStyle=inSafeZone()?'#06251bdc':'#101923d9';ctx.strokeStyle=inSafeZone()?'#66ffae':'#8aa0ad';ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(W/2-124,78,248,44,10);ctx.fill();ctx.stroke();ctx.fillStyle=inSafeZone()?'#9dffc8':'#e1eaf0';ctx.font='bold 14px system-ui';ctx.textAlign='center';ctx.fillText(inSafeZone()?'🛡 SAFE ZONE · SHOP + WAFFENKISTE':'T = ZUR SAFE ZONE · HÄNDLER ANTIPPEN',W/2,105);ctx.restore()}
 // Distinctive first-person weapon skins: each class has its own silhouette, colors and surface details.
 function drawWeaponSkin(index){
  const scale=Math.min(W/320,1.55);ctx.save();ctx.scale(scale,scale);
