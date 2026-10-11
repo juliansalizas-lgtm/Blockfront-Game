@@ -8,10 +8,147 @@
 <div id="start"><div id="card"><h1>BLOCK<span style="color:#69d99a">FRONT</span></h1><p><b>3D TESTWELT · PROTOTYP</b></p><p>Das ist ein neuer Test für echtes 3D mit räumlicher Kamera, Licht, Schatten, Block-Gebäuden und Zombies – nicht die alte 2D-Raycaster-Ansicht.</p><p><b>Computer:</b> WASD laufen, Maus schauen, Leertaste springen, Linksklick schießen.<br><b>iPad:</b> linker Joystick laufen, auf der rechten Bildschirmhälfte ziehen zum Umschauen (langsam und vorsichtig), rechts springen und schießen.</p><button id="play">TESTWELT STARTEN</button><p style="font-size:12px;color:#9fb6c3">Zum Laden wird Three.js aus einem CDN benötigt. Internetverbindung erforderlich.</p></div></div>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
- const skinTexture = new THREE.TextureLoader().load('./Zombie.png');
-skinTexture.colorSpace = THREE.SRGBColorSpace;
-skinTexture.magFilter = THREE.NearestFilter;
-skinTexture.minFilter = THREE.NearestFilter; 
+ 
+function spawnZombie(x, z, forcedType = null) {
+  const group = new THREE.Group();
+
+  const variants = [
+    { name: 'Normal', hp: 3 },
+    { name: 'Infiziert', hp: 3 },
+    { name: 'Militär', hp: 4 },
+    { name: 'Arbeiter', hp: 3 }
+  ];
+
+  const variant = variants[
+    forcedType === null
+      ? Math.floor(Math.random() * variants.length)
+      : forcedType % variants.length
+  ];
+
+  // Skin-Koordinaten im 64x64-Minecraft-Skin.
+  // Reihenfolge der BoxGeometry-Flächen:
+  // rechts, links, oben, unten, hinten, vorne.
+  function skinBox(w, h, d, uv) {
+    const geometry = new THREE.BoxGeometry(w, h, d);
+    const coords = geometry.attributes.uv;
+
+    for (let face = 0; face < 6; face++) {
+      const [x, y, rw, rh] = uv[face];
+      const u0 = x / 64;
+      const u1 = (x + rw) / 64;
+      const vTop = 1 - y / 64;
+      const vBottom = 1 - (y + rh) / 64;
+
+      const values = [
+        u1, vBottom,
+        u0, vBottom,
+        u1, vTop,
+        u0, vTop
+      ];
+
+      for (let i = 0; i < 4; i++) {
+        coords.setXY(face * 4 + i, values[i * 2], values[i * 2 + 1]);
+      }
+    }
+
+    coords.needsUpdate = true;
+
+    const mesh = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        map: skinTexture,
+        roughness: 1
+      })
+    );
+
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    return mesh;
+  }
+
+  // Kopf: 8x8x8 Pixel
+  const headUV = [
+    [0, 8, 8, 8],    // rechts
+    [16, 8, 8, 8],   // links
+    [8, 0, 8, 8],    // oben
+    [16, 0, 8, 8],   // unten
+    [24, 8, 8, 8],   // hinten
+    [8, 8, 8, 8]     // vorne
+  ];
+
+  // Körper: 8x12x4 Pixel
+  const bodyUV = [
+    [16, 20, 4, 12],
+    [28, 20, 4, 12],
+    [20, 16, 8, 4],
+    [28, 16, 8, 4],
+    [32, 20, 8, 12],
+    [20, 20, 8, 12]
+  ];
+
+  // Beine: 4x12x4 Pixel
+  const legUV = [
+    [0, 20, 4, 12],
+    [8, 20, 4, 12],
+    [4, 16, 4, 4],
+    [8, 16, 4, 4],
+    [12, 20, 4, 12],
+    [4, 20, 4, 12]
+  ];
+
+  // Arme: 4x12x4 Pixel, klassische Skin-Anordnung
+  const armUV = [
+    [40, 20, 4, 12],
+    [48, 20, 4, 12],
+    [44, 16, 4, 4],
+    [48, 16, 4, 4],
+    [52, 20, 4, 12],
+    [44, 20, 4, 12]
+  ];
+
+  const head = skinBox(.58, .58, .58, headUV);
+  head.position.set(0, 1.83, -.015);
+
+  const body = skinBox(.72, .86, .4, bodyUV);
+  body.position.set(0, 1.08, 0);
+
+  const armL = new THREE.Group();
+  armL.position.set(-.48, 1.42, 0);
+  group.add(armL);
+
+  const leftArmMesh = skinBox(.2, .86, .22, armUV);
+  armL.add(leftArmMesh);
+  leftArmMesh.position.y = -.43;
+
+  const armR = new THREE.Group();
+  armR.position.set(.48, 1.42, 0);
+  group.add(armR);
+
+  const rightArmMesh = skinBox(.2, .86, .22, armUV);
+  armR.add(rightArmMesh);
+  rightArmMesh.position.y = -.43;
+
+  const legL = skinBox(.25, .5, .29, legUV);
+  legL.position.set(-.2, .34, .015);
+
+  const legR = skinBox(.25, .5, .29, legUV);
+  legR.position.set(.2, .34, .015);
+
+  group.position.set(x, 0, z);
+  group.userData = {
+    hp: variant.hp,
+    hit: 0,
+    phase: Math.random() * 6,
+    armL,
+    armR,
+    type: variant.name
+  };
+
+  scene.add(group);
+  zombies.push(group);
+}
+
 const $=id=>document.getElementById(id);let scene,camera,renderer,clock,player,velY=0,onGround=true,health=100,ammo=24,started=false,locked=false,move={f:0,s:0},yaw=0,pitch=0,dragLook=false,lastX=0,lastY=0,toastTimer=0;const keys={},zombies=[],solids=[],raycaster=new THREE.Raycaster();
 function mat(color,roughness=1){return new THREE.MeshStandardMaterial({color,roughness})}
 function box(x,y,z,sx,sy,sz,color,opts={}){const mesh=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),mat(color));mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;scene.add(mesh);if(opts.solid!==false)solids.push({x,z,sx,sz,mesh});return mesh}
