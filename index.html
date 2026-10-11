@@ -8,7 +8,10 @@
 <div id="start"><div id="card"><h1>BLOCK<span style="color:#69d99a">FRONT</span></h1><p><b>3D TESTWELT · PROTOTYP</b></p><p>Das ist ein neuer Test für echtes 3D mit räumlicher Kamera, Licht, Schatten, Block-Gebäuden und Zombies – nicht die alte 2D-Raycaster-Ansicht.</p><p><b>Computer:</b> WASD laufen, Maus schauen, Leertaste springen, Linksklick schießen.<br><b>iPad:</b> linker Joystick laufen, auf der rechten Bildschirmhälfte ziehen zum Umschauen (langsam und vorsichtig), rechts springen und schießen.</p><button id="play">TESTWELT STARTEN</button><p style="font-size:12px;color:#9fb6c3">Zum Laden wird Three.js aus einem CDN benötigt. Internetverbindung erforderlich.</p></div></div>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
- 
+ const skinTexture = new THREE.TextureLoader().load('./Zombie.png');
+skinTexture.colorSpace = THREE.SRGBColorSpace;
+skinTexture.magFilter = THREE.NearestFilter;
+skinTexture.minFilter = THREE.NearestFilter;
 function spawnZombie(x, z, forcedType = null) {
   const group = new THREE.Group();
 
